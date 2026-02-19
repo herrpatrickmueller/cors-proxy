@@ -1,5 +1,16 @@
 <?php
 
+// Add CORS headers to allow frontend requests
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, X-Requested-With');
+
+// Handle preflight OPTIONS request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
 $enable_jsonp    = false;
 $enable_native   = false;
 $valid_url_regex = '/.*/';
@@ -15,7 +26,7 @@ if (!$url) {
 } else {
     $curl_handle = curl_init($url);
     $url_parsed = parse_url($url);
-    $url_base = $parts['scheme'] . "://" . $parts['host'];
+    $url_base = $url_parsed['scheme'] . "://" . $url_parsed['host'];
 
     if (strtolower($_SERVER['REQUEST_METHOD']) === 'post') {
         curl_setopt($curl_handle, CURLOPT_POST, true);
