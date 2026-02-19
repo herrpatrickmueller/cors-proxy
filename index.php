@@ -33,12 +33,12 @@ if (!$url) {
         curl_setopt($curl_handle, CURLOPT_POSTFIELDS, $_POST);
     }
 
-    if ($_GET['send_cookies']) {
+    if (isset($_GET['send_cookies']) && $_GET['send_cookies']) {
         $cookie = array();
         foreach ($_COOKIE as $key => $value) {
             $cookie[] = $key . '=' . $value;
         }
-        if ($_GET['send_session']) {
+        if (isset($_GET['send_session']) && $_GET['send_session']) {
             $cookie[] = SID;
         }
         $cookie = implode('; ', $cookie);
@@ -51,25 +51,56 @@ if (!$url) {
     curl_setopt($curl_handle, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($curl_handle, CURLOPT_ENCODING, "");
 
-    curl_setopt($curl_handle, CURLOPT_USERAGENT, $_GET['user_agent'] ? $_GET['user_agent'] : $_SERVER['HTTP_USER_AGENT']);
+    curl_setopt($curl_handle, CURLOPT_USERAGENT, isset($_GET['user_agent']) ? $_GET['user_agent'] : (isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : 'Mozilla/5.0'));
+    
+    // Set Accept header to handle various content types
+    $accept_header = isset($_SERVER['HTTP_ACCEPT']) ? $_SERVER['HTTP_ACCEPT'] : '*/*';
+    curl_setopt($curl_handle, CURLOPT_HTTPHEADER, array('Accept: ' . $accept_header));
 
     $response = curl_exec($curl_handle);
     
-    // Split headers from content - look for double newline (CRLF or LF)
-    $header_size = curl_getinfo($curl_handle, CURLINFO_HEADER_SIZE);
-    $header = substr($response, 0, $header_size);
-    $contents = substr($response, $header_size);
+    // Check for cURL errors
+    if ($response === false) {
+        $contents = 'ERROR: ' . curl_error($curl_handle);
+        $status = array('http_code' => 'ERROR');
+        $header = '';
+    } else {
+        // Split headers from content - look for double newline (CRLF or LF)
+        $header_size = curl_getinfo($curl_handle, CURLINFO_HEADER_SIZE);
+        $header = substr($response, 0, $header_size);
+        $contents = substr($response, $header_size);
 
-    $replace['/href="(?!https?:\/\/)(?!data:)(?!#)/'] = 'href="' . $url_base;
-    $replace['/src="(?!https?:\/\/)(?!data:)(?!#)/'] = 'src="' . $url_base;
-    $replace['/href=\'(?!https?:\/\/)(?!data:)(?!#)/'] = 'href="' . $url_base;
-    $replace['/src=\'(?!https?:\/\/)(?!data:)(?!#)/'] = 'src="' . $url_base;
-    $replace['/@import[\n+\s+]"\//'] = '@import "' . $url_base;
-    $replace['/@import[\n+\s+]"\./'] = '@import "' . $url_base;
+        // Debug: Add response info if debug parameter is set
+        if (isset($_GET['debug'])) {
+            $debug_info = array(
+                'url_requested' => $url,
+                'response_length' => strlen($response),
+                'header_size' => $header_size,
+                'content_length' => strlen($contents),
+                'raw_contents' => $contents,  // Show full content for debugging
+                'headers' => substr($header, 0, 500)  // First 500 chars of headers
+            );
+        }
 
-    $contents = preg_replace(array_keys($replace), array_values($replace), $contents);
+        // Get content type from response
+        $status = curl_getinfo($curl_handle);
+        $content_type = isset($status['content_type']) ? $status['content_type'] : '';
+        
+        // Only apply HTML replacements if content is HTML
+        if (stripos($content_type, 'html') !== false) {
+            $replace['/href="(?!https?:\/\/)(?!data:)(?!#)/'] = 'href="' . $url_base;
+            $replace['/src="(?!https?:\/\/)(?!data:)(?!#)/'] = 'src="' . $url_base;
+            $replace['/href=\'(?!https?:\/\/)(?!data:)(?!#)/'] = 'href="' . $url_base;
+            $replace['/src=\'(?!https?:\/\/)(?!data:)(?!#)/'] = 'src="' . $url_base;
+            $replace['/@import[\n+\s+]"\//'] = '@import "' . $url_base;
+            $replace['/@import[\n+\s+]"\./'] = '@import "' . $url_base;
 
-    $status = curl_getinfo($curl_handle);
+            $replaced = preg_replace(array_keys($replace), array_values($replace), $contents);
+            if ($replaced !== null) {
+                $contents = $replaced;
+            }
+        }
+    }
 
     curl_close($curl_handle);
 }
@@ -77,7 +108,7 @@ if (!$url) {
 // Split header text into an array.
 $header_text = preg_split('/[\r\n]+/', $header);
 
-if ($_GET['mode'] === 'native') {
+if (isset($_GET['mode']) && $_GET['mode'] === 'native') {
     if (!$enable_native) {
         $contents = 'ERROR: invalid mode';
         $status = array('http_code' => 'ERROR');
@@ -95,7 +126,7 @@ if ($_GET['mode'] === 'native') {
     $data = array();
 
     // Propagate all HTTP headers into the JSON data object.
-    if ($_GET['full_headers']) {
+    if (isset($_GET['full_headers']) && $_GET['full_headers']) {
         $data['headers'] = array();
 
         foreach ($header_text as $header) {
@@ -107,19 +138,25 @@ if ($_GET['mode'] === 'native') {
     }
 
     // Propagate all cURL request / response info to the JSON data object.
-    if ($_GET['full_status']) {
+    if (isset($_GET['full_status']) && $_GET['full_status']) {
         $data['status'] = $status;
     } else {
         $data['status'] = array();
         $data['status']['http_code'] = $status['http_code'];
     }
 
+    // Include debug info if requested
+    if (isset($_GET['debug']) && isset($debug_info)) {
+        $data['debug'] = $debug_info;
+    }
+
     // Set the JSON data object contents, decoding it from JSON if possible.
     $decoded_json = json_decode($contents);
-    $data['contents'] = $decoded_json ? $decoded_json : $contents;
+    // Only use decoded JSON if decoding was successful (check for JSON errors)
+    $data['contents'] = (json_last_error() === JSON_ERROR_NONE && $decoded_json !== null) ? $decoded_json : $contents;
 
     // Generate appropriate content-type header.
-    $is_xhr = strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest';
+    $is_xhr = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest';
     header('Content-type: application/' . ($is_xhr ? 'json' : 'x-javascript'));
 
     // Get JSONP callback.
