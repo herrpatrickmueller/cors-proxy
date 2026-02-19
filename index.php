@@ -53,7 +53,12 @@ if (!$url) {
 
     curl_setopt($curl_handle, CURLOPT_USERAGENT, $_GET['user_agent'] ? $_GET['user_agent'] : $_SERVER['HTTP_USER_AGENT']);
 
-    list($header, $contents) = preg_split('/([\r\n][\r\n])\\1/', curl_exec($curl_handle), 2);
+    $response = curl_exec($curl_handle);
+    
+    // Split headers from content - look for double newline (CRLF or LF)
+    $header_size = curl_getinfo($curl_handle, CURLINFO_HEADER_SIZE);
+    $header = substr($response, 0, $header_size);
+    $contents = substr($response, $header_size);
 
     $replace['/href="(?!https?:\/\/)(?!data:)(?!#)/'] = 'href="' . $url_base;
     $replace['/src="(?!https?:\/\/)(?!data:)(?!#)/'] = 'src="' . $url_base;
