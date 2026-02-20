@@ -14,11 +14,19 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           eval $(ssh-agent -s)
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d | ssh-add -
           mkdir -p ~/.ssh
           echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+          if echo "$SSH_PRIVATE_KEY" | grep -q "-----BEGIN"; then
+            printf "%s\n" "$SSH_PRIVATE_KEY" > /tmp/ci_key
+          else
+            echo "$SSH_PRIVATE_KEY" | base64 -d > /tmp/ci_key
+          fi
+          chmod 600 /tmp/ci_key
+          ssh-add /tmp/ci_key
       
       - name: Deploy application
         run: |
